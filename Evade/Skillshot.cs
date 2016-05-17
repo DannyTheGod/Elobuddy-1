@@ -84,6 +84,7 @@ namespace Evade
         public DetectionType DetectionType;
         public Vector2 Direction;
         public Geometry.Polygon DrawingPolygon;
+
         public Vector2 OriginalEnd;
         public Vector2 End;
 
@@ -188,18 +189,11 @@ namespace Evade
         /// <summary>
         /// Returns the value from this skillshot menu.
         /// </summary>
-        public Slider GetSliderValue(string name)
+        public T GetValue<T>(string name)
         {
-            return Config.skillShots[name + SpellData.MenuItemName].Cast<Slider>();
+            return Config.Menu.Item(name + SpellData.MenuItemName).GetValue<T>();
         }
-        public CheckBox GetCheckBoxValue(string name)
-        {
-            return Config.skillShots[name + SpellData.MenuItemName].Cast<CheckBox>();
-        }
-        public KeyBind GetKeyBindValue(string name)
-        {
-            return Config.skillShots[name + SpellData.MenuItemName].Cast<KeyBind>();
-        }
+
         /// <summary>
         /// Returns if the skillshot has expired.
         /// </summary>
@@ -227,7 +221,7 @@ namespace Evade
                 return _cachedValue;
             }
 
-            if (!GetCheckBoxValue("IsDangerous").CurrentValue && Config.Menu["OnlyDangerous"].Cast<KeyBind>().CurrentValue)
+            if (!GetValue<bool>("IsDangerous") && Config.Menu.Item("OnlyDangerous").GetValue<KeyBind>().Active)
             {
                 _cachedValue = false;
                 _cachedValueTick = Utils.TickCount;
@@ -235,7 +229,7 @@ namespace Evade
             }
 
 
-            _cachedValue = GetCheckBoxValue("Enabled").CurrentValue;
+            _cachedValue = GetValue<bool>("Enabled");
             _cachedValueTick = Utils.TickCount;
 
             return _cachedValue;
@@ -245,7 +239,7 @@ namespace Evade
         {
             //Even if it doesnt consume a lot of resources with 20 updatest second works k
             if (SpellData.CollisionObjects.Count() > 0 && SpellData.CollisionObjects != null &&
-                Utils.TickCount - _lastCollisionCalc > 50 && Config.collision["EnableCollision"].Cast<CheckBox>().CurrentValue)
+                Utils.TickCount - _lastCollisionCalc > 50 && Config.Menu.Item("EnableCollision").GetValue<bool>())
             {
                 _lastCollisionCalc = Utils.TickCount;
                 _collisionEnd = Collision.GetCollisionPoint(this);
@@ -268,13 +262,15 @@ namespace Evade
                     UpdatePolygon();
                 }
             }
-             if (SpellData.SpellName == "TaricE")
+
+            if (SpellData.SpellName == "TaricE")
             {
                 Start = Unit.ServerPosition.To2D();
                 End = Start + Direction * this.SpellData.Range;
                 Rectangle = new Geometry.Rectangle(Start, End, SpellData.Radius);
                 UpdatePolygon();
             }
+
             if (SpellData.SpellName == "SionR")
             {
                 if (_helperTick == 0)
@@ -283,7 +279,7 @@ namespace Evade
                 }
 
                 SpellData.MissileSpeed = (int)Unit.MoveSpeed;
-                if (Unit.IsValidTarget(float.MaxValue))
+                if (Unit.IsValidTarget(float.MaxValue, false))
                 {
                     if (!Unit.HasBuff("SionR") && Utils.TickCount - _helperTick > 600)
                     {
@@ -667,7 +663,7 @@ namespace Evade
 
         public void Draw(Color color, Color missileColor, int width = 1)
         {
-            if (!GetCheckBoxValue("Draw").CurrentValue)
+            if (!GetValue<bool>("Draw"))
             {
                 return;
             }
@@ -677,8 +673,8 @@ namespace Evade
             {
                 var position = GetMissilePosition(0);
                 Utils.DrawLineInWorld(
-                    (position + SpellData.Radius*Direction.Perpendicular()).To3D(),
-                    (position - SpellData.Radius*Direction.Perpendicular()).To3D(), 2, missileColor);
+                    (position + SpellData.Radius * Direction.Perpendicular()).To3D(),
+                    (position - SpellData.Radius * Direction.Perpendicular()).To3D(), 2, missileColor);
             }
         }
     }
