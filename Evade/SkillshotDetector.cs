@@ -44,10 +44,10 @@ namespace Evade
             //Detect when projectiles collide.
             GameObject.OnDelete += ObjSpellMissileOnOnDelete;
             GameObject.OnCreate += ObjSpellMissileOnOnCreate;
-            //GameObject.OnCreate += GameObject_OnCreate; //TODO: Detect lux R and other large skillshots.
+            GameObject.OnCreate += GameObject_OnCreate; //TODO: Detect lux R and other large skillshots.
             GameObject.OnDelete += GameObject_OnDelete;
 
-            if (Config.TestOnAllies && ObjectManager.Get<AIHeroClient>().Count() == 1)
+            if (Config.TestOnAllies && ObjectManager.Get<Obj_AI_Hero>().Count() == 1)
             {
                 Game.OnWndProc += Game_OnWndProc;
             }
@@ -55,15 +55,34 @@ namespace Evade
 
         private static void Game_OnWndProc(WndEventArgs args)
         {
-            if (args.Msg == (uint)WindowMessages.KeyUp)
+            if (args.Msg == (uint)WindowsMessages.WM_KEYUP)
             {
                 TriggerOnDetectSkillshot(
                     DetectionType.ProcessSpell, SpellDatabase.GetByName("TestSkillShot"), Utils.TickCount,
-                    Program.PlayerPosition, Game.CursorPos.To2D(), ObjectManager.Player);
+                    Program.PlayerPosition, Game.CursorPos.To2D(), Game.CursorPos.To2D(), ObjectManager.Player);
             }
         }
 
-        private static void GameObject_OnCreate(GameObject sender, EventArgs args) { }
+        private static void GameObject_OnCreate(GameObject sender, EventArgs args)
+        {
+            /*if (ObjectManager.Player.Distance(sender.Position) < 1000)
+            {
+                Console.WriteLine(Utils.TickCount + " " + sender.Name + " " + sender.IsAlly + " " + sender.Type);
+            }*/
+            var spellData = SpellDatabase.GetBySourceObjectName(sender.Name);
+
+            if (spellData == null)
+            {
+                return;
+            }
+            
+            if (Config.Menu.Item("Enabled" + spellData.MenuItemName) == null)
+            {
+                return;
+            }
+
+            TriggerOnDetectSkillshot(DetectionType.ProcessSpell, spellData, Utils.TickCount - Game.Ping / 2, sender.Position.To2D(), sender.Position.To2D(), sender.Position.To2D(), HeroManager.AllHeroes.MinOrDefault(h => h.IsAlly ? 1 : 0));
+        }
 
         private static void GameObject_OnDelete(GameObject sender, EventArgs args)
         {
@@ -91,7 +110,7 @@ namespace Evade
                 return;
             }
 
-            var unit = missile.SpellCaster as AIHeroClient;
+            var unit = missile.SpellCaster as Obj_AI_Hero;
 
             if (unit == null || !unit.IsValid || (unit.Team == ObjectManager.Player.Team && !Config.TestOnAllies))
             {
@@ -112,7 +131,10 @@ namespace Evade
                 return;
             }
 
-            Core.DelayAction(() => ObjSpellMissionOnOnCreateDelayed(sender, args), 0);
+            Utility.DelayAction.Add(0, delegate
+            {
+                ObjSpellMissionOnOnCreateDelayed(sender, args);
+            });
         }
 
         private static void ObjSpellMissionOnOnCreateDelayed(GameObject sender, EventArgs args)
@@ -124,7 +146,7 @@ namespace Evade
                 return;
             }
 
-            var unit = missile.SpellCaster as AIHeroClient;
+            var unit = missile.SpellCaster as Obj_AI_Hero;
 
             if (unit == null || !unit.IsValid || (unit.Team == ObjectManager.Player.Team && !Config.TestOnAllies))
             {
@@ -132,7 +154,7 @@ namespace Evade
             }
 
 
-            /*Console.WriteLine(
+            /* Console.WriteLine(
                     Utils.TickCount + " Projectile Created: " + missile.SData.Name + " distance: " +
                     missile.SData.CastRange + "Radius: " +
                     missile.SData.LineWidth + " Speed: " + missile.SData.MissileSpeed);  */
@@ -167,7 +189,7 @@ namespace Evade
                            (int)(1000f * missilePosition.Distance(unitPosition) / spellData.MissileSpeed);
 
             //Trigger the skillshot detection callbacks.
-            TriggerOnDetectSkillshot(DetectionType.RecvPacket, spellData, castTime, unitPosition, endPos, unit);
+            TriggerOnDetectSkillshot(DetectionType.RecvPacket, spellData, castTime, unitPosition, endPos, endPos, unit);
         }
 
         /// <summary>
@@ -182,7 +204,7 @@ namespace Evade
                 return;
             }
 
-            var caster = missile.SpellCaster as AIHeroClient;
+            var caster = missile.SpellCaster as Obj_AI_Hero;
 
             if (caster == null || !caster.IsValid || (caster.Team == ObjectManager.Player.Team && !Config.TestOnAllies))
             {
@@ -207,8 +229,8 @@ namespace Evade
             }
 
 #if DEBUG
-            Console.WriteLine(
-                "Missile deleted: " + missile.SData.Name + " D: " + missile.EndPosition.Distance(missile.Position));
+           /* Console.WriteLine(
+                "Missile deleted: " + missile.SData.Name + " D: " + missile.EndPosition.Distance(missile.Position)); */
 #endif
 
             Program.DetectedSkillshots.RemoveAll(
@@ -236,9 +258,13 @@ namespace Evade
             int startT,
             Vector2 start,
             Vector2 end,
+            Vector2 originalEnd,
             Obj_AI_Base unit)
         {
-            var skillshot = new Skillshot(detectionType, spellData, startT, start, end, unit);
+            var skillshot = new Skillshot(detectionType, spellData, startT, start, end, unit)
+            {
+                OriginalEnd = originalEnd
+            };
 
             if (OnDetectSkillshot != null)
             {
@@ -256,9 +282,9 @@ namespace Evade
                 return;
             }
 
-            if (Config.PrintSpellData && sender is AIHeroClient)
+            if (Config.PrintSpellData && sender is Obj_AI_Hero)
             {
-                Chat.Print(Utils.TickCount + " ProcessSpellCast: " + args.SData.Name);
+                Game.PrintChat(Utils.TickCount + " ProcessSpellCast: " + args.SData.Name);
                 Console.WriteLine(Utils.TickCount + " ProcessSpellCast: " + args.SData.Name);
             }
 
@@ -308,7 +334,7 @@ namespace Evade
                         var start = obj.Position.To2D();
                         var end = start + spellData.Range * (args.End.To2D() - obj.Position.To2D()).Normalized();
                         TriggerOnDetectSkillshot(
-                            DetectionType.ProcessSpell, spellData, Utils.TickCount - Game.Ping / 2, start, end,
+                            DetectionType.ProcessSpell, spellData, Utils.TickCount - Game.Ping / 2, start, end, end,
                             sender);
                     }
                 }
@@ -343,7 +369,7 @@ namespace Evade
 
             //Trigger the skillshot detection callbacks.
             TriggerOnDetectSkillshot(
-                DetectionType.ProcessSpell, spellData, Utils.TickCount - Game.Ping / 2, startPos, endPos, sender);
+                DetectionType.ProcessSpell, spellData, Utils.TickCount - Game.Ping / 2, startPos, endPos, args.End.To2D(), sender);
         }
 
         /// <summary>
@@ -356,26 +382,26 @@ namespace Evade
             {
                 var packet = new GamePacket(args.PacketData);
 
-                packet.SetHeader(new PacketHeader(packet));
+                packet.Position = 1;
 
-                packet.Read<float>(); //Missile network ID
+                packet.ReadFloat(); //Missile network ID
 
-                var missilePosition = new Vector3(packet.Read<float>(), packet.Read<float>(), packet.Read<float>());
-                var unitPosition = new Vector3(packet.Read<float>(), packet.Read<float>(), packet.Read<float>());
+                var missilePosition = new Vector3(packet.ReadFloat(), packet.ReadFloat(), packet.ReadFloat());
+                var unitPosition = new Vector3(packet.ReadFloat(), packet.ReadFloat(), packet.ReadFloat());
 
-                packet.Position = packet.Data.Length - 119;
-                var missileSpeed = packet.Read<float>();
+                packet.Position = packet.Size() - 119;
+                var missileSpeed = packet.ReadFloat();
 
                 packet.Position = 65;
-                var endPos = new Vector3(packet.Read<float>(), packet.Read<float>(), packet.Read<float>());
+                var endPos = new Vector3(packet.ReadFloat(), packet.ReadFloat(), packet.ReadFloat());
 
                 packet.Position = 112;
-                var id = packet.Read<byte>();
+                var id = packet.ReadByte();
 
 
-                packet.Position = packet.Data.Length - 83;
+                packet.Position = packet.Size() - 83;
 
-                var unit = ObjectManager.GetUnitByNetworkId<AIHeroClient>(packet.Read<uint>());
+                var unit = ObjectManager.GetUnitByNetworkId<Obj_AI_Hero>(packet.ReadInteger());
                 if ((!unit.IsValid || unit.Team == ObjectManager.Player.Team) && !Config.TestOnAllies)
                 {
                     return;
@@ -399,7 +425,7 @@ namespace Evade
                 //Trigger the skillshot detection callbacks.
                 TriggerOnDetectSkillshot(
                     DetectionType.RecvPacket, spellData, castTime, unitPosition.SwitchYZ().To2D(),
-                    endPos.SwitchYZ().To2D(), unit);
+                    endPos.SwitchYZ().To2D(), endPos.SwitchYZ().To2D(), unit);
             }
         }
     }
