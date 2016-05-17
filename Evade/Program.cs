@@ -64,6 +64,7 @@ namespace Evade
                 }
             }
         }
+
         public static bool Keepfollowing { get; set; }
 
         public static int LastWardJumpAttempt = 0;
@@ -115,7 +116,12 @@ namespace Evade
 
         private static void Main(string[] args)
         {
-            Loading.OnLoadingComplete += Game_OnGameStart;
+            if (Game.Mode == GameMode.Running)
+            {
+                Game_OnGameStart(new EventArgs());
+            }
+           
+            Game.OnStart += Game_OnGameStart;
         }
 
         
@@ -125,10 +131,10 @@ namespace Evade
 
             //Create the menu to allow the user to change the config.
             Config.CreateMenu();
-
+            
             //Add the game events.
             Game.OnUpdate += Game_OnOnGameUpdate;
-            Player.OnIssueOrder += ObjAiHeroOnOnIssueOrder;
+            Obj_AI_Hero.OnIssueOrder += ObjAiHeroOnOnIssueOrder;
             Spellbook.OnCastSpell += Spellbook_OnCastSpell;
             //Set up the OnDetectSkillshot Event.
             SkillshotDetector.OnDetectSkillshot += OnDetectSkillshot;
@@ -138,25 +144,28 @@ namespace Evade
             Drawing.OnDraw += Drawing_OnDraw;
 
             //Ondash event.
-            Dash.OnDash += UnitOnOnDash;
+            CustomEvents.Unit.OnDash += UnitOnOnDash;
 
             DetectedSkillshots.OnAdd += DetectedSkillshots_OnAdd;
 
             //Initialze the collision
             Collision.Init();
 
-            Chat.Print("Evade Loaded", Color.Green);
-            Console.WriteLine("Evade:: Evade Loaded");
-            
             if (Config.PrintSpellData)
             {
-                foreach (var hero in ObjectManager.Get<AIHeroClient>())
+                foreach (var hero in ObjectManager.Get<Obj_AI_Hero>())
                 {
-                    foreach (var spell in hero.Spellbook.Spells)
+                    foreach (var spell in hero.Spellbook.Spells.Where(s => s.SData.Name != "BaseSpell"))
                     {
-                 /*       Console.WriteLine(
-                             "Slot  " + spell.Slot + " " + spell.SData.Name + " w:" + spell.SData.LineWidth + " s:" + spell.SData.MissileSpeed + " r: " +
-                            spell.SData.CastRangeArray[0]);*/
+                        Console.WriteLine("\n\n");
+                        Console.WriteLine("SpellSlot: {0} Spell: {1}", spell.Slot, spell.SData.Name);
+                        Console.WriteLine("=================================================================");
+                        foreach (var prop in spell.SData.GetType().GetProperties())
+                        {
+                            if(prop.Name != "Entries")
+                            Console.WriteLine("\t{0} => '{1}'", prop.Name, prop.GetValue(spell.SData, null));
+                        }
+
                     }
                 }
                 Console.WriteLine(ObjectManager.Player.Spellbook.GetSpell(SpellSlot.W).Name);
@@ -191,7 +200,7 @@ namespace Evade
             //Check if the skillshot is already added.
             var alreadyAdded = false;
 
-            if (Config.misc["DisableFow"].Cast<CheckBox>().CurrentValue && !skillshot.Unit.IsVisible)
+            if (Config.Menu.Item("DisableFow").GetValue<bool>() && !skillshot.Unit.IsVisible)
             {
                 return;
             }
@@ -277,6 +286,25 @@ namespace Evade
                         DetectedSkillshots.Add(skillshotToAdd);
                         return;
                     }
+
+                    if (skillshot.SpellData.SpellName == "TaricE" && (skillshot.Unit as Obj_AI_Hero).ChampionName == "Taric")
+                    {
+                        var target = HeroManager.AllHeroes.FirstOrDefault(h => h.Team == skillshot.Unit.Team && h.IsVisible && h.HasBuff("taricwleashactive"));
+                        if (target != null)
+                        {
+                            var start = target.ServerPosition.To2D();
+                            var direction = (skillshot.OriginalEnd - start).Normalized();
+                            var end = start + direction * skillshot.SpellData.Range;
+                            var skillshotToAdd = new Skillshot(
+                                    skillshot.DetectionType, skillshot.SpellData, skillshot.StartTick,
+                                    start, end, target)
+                            {
+                              OriginalEnd = skillshot.OriginalEnd
+                            };
+                            DetectedSkillshots.Add(skillshotToAdd);
+                        }
+                    }
+
                     if (skillshot.SpellData.SpellName == "SyndraE" || skillshot.SpellData.SpellName == "syndrae5")
                     {
                         var angle = 60;
@@ -285,21 +313,40 @@ namespace Evade
                                 -angle / 2 * (float) Math.PI / 180);
                         var edge2 = edge1.Rotated(angle * (float) Math.PI / 180);
 
+                        var positions = new List<Vector2>();
+
+                        var explodingQ = DetectedSkillshots.FirstOrDefault(s => s.SpellData.SpellName == "SyndraQ");
+
+                        if (explodingQ != null)
+                        {
+                            positions.Add(explodingQ.End);
+                        }
+
                         foreach (var minion in ObjectManager.Get<Obj_AI_Minion>())
                         {
-                            var v = minion.ServerPosition.To2D() - skillshot.Unit.ServerPosition.To2D();
-                            if (minion.Name == "Seed" && edge1.CrossProduct(v) > 0 && v.CrossProduct(edge2) > 0 &&
-                                minion.Distance(skillshot.Unit) < 800 &&
-                                (minion.Team != ObjectManager.Player.Team || Config.TestOnAllies))
+                            if (minion.Name == "Seed" && !minion.IsDead && (minion.Team != ObjectManager.Player.Team || Config.TestOnAllies))
                             {
-                                var start = minion.ServerPosition.To2D();
+                                positions.Add(minion.ServerPosition.To2D());
+                            }
+                        }
+                        Console.WriteLine(positions.Count + " positions to check");
+                        foreach (var position in positions)
+                        {
+                            var v = position - skillshot.Unit.ServerPosition.To2D();
+                            if (edge1.CrossProduct(v) > 0 && v.CrossProduct(edge2) > 0 &&
+                                position.Distance(skillshot.Unit) < 800 )
+                            {
+                                var start = position;
                                 var end = skillshot.Unit.ServerPosition.To2D()
                                     .Extend(
-                                        minion.ServerPosition.To2D(),
-                                        skillshot.Unit.Distance(minion) > 200 ? 1300 : 1000);
+                                        position,
+                                        skillshot.Unit.Distance(position) > 200 ? 1300 : 1000);
 
+                                var startTime = skillshot.StartTick;
+
+                                startTime += (int)(150 + skillshot.Unit.Distance(position) / 2.5f);
                                 var skillshotToAdd = new Skillshot(
-                                    skillshot.DetectionType, skillshot.SpellData, skillshot.StartTick, start, end,
+                                    skillshot.DetectionType, skillshot.SpellData, startTime, start, end,
                                     skillshot.Unit);
                                 DetectedSkillshots.Add(skillshotToAdd);
                             }
@@ -307,10 +354,21 @@ namespace Evade
                         return;
                     }
 
-                    if (skillshot.SpellData.SpellName == "AlZaharCalloftheVoid")
+                    if (skillshot.SpellData.SpellName == "MalzaharQ")
                     {
                         var start = skillshot.End - skillshot.Direction.Perpendicular() * 400;
                         var end = skillshot.End + skillshot.Direction.Perpendicular() * 400;
+                        var skillshotToAdd = new Skillshot(
+                            skillshot.DetectionType, skillshot.SpellData, skillshot.StartTick, start, end,
+                            skillshot.Unit);
+                        DetectedSkillshots.Add(skillshotToAdd);
+                        return;
+                    }
+
+                    if (skillshot.SpellData.SpellName == "ZyraQ")
+                    {
+                        var start = skillshot.End - skillshot.Direction.Perpendicular() * 450;
+                        var end = skillshot.End + skillshot.Direction.Perpendicular() * 450;
                         var skillshotToAdd = new Skillshot(
                             skillshot.DetectionType, skillshot.SpellData, skillshot.StartTick, start, end,
                             skillshot.Unit);
@@ -452,7 +510,7 @@ namespace Evade
             }
 
             //Evading disabled
-            if (!Config.Menu["Enabled"].Cast<KeyBind>().CurrentValue)
+            if (!Config.Menu.Item("Enabled").GetValue<KeyBind>().Active)
             {
                 Evading = false;
                 EvadeToPoint = Vector2.Zero;
@@ -460,7 +518,7 @@ namespace Evade
                 return;
             }
 
-            if (PlayerChampionName == "Olaf" && Config.misc["DisableEvadeForOlafR"].Cast<CheckBox>().CurrentValue && ObjectManager.Player.HasBuff("OlafRagnarok"))
+            if (PlayerChampionName == "Olaf" && Config.Menu.Item("DisableEvadeForOlafR").GetValue<bool>() && ObjectManager.Player.HasBuff("OlafRagnarok"))
             {
                 Evading = false;
                 EvadeToPoint = Vector2.Zero;
@@ -478,7 +536,7 @@ namespace Evade
             }
 
             //Avoid sending move/cast packets while channeling interruptable spells that cause hero not being able to move.
-            if (Player.Instance.Spellbook.IsChanneling)
+            if (ObjectManager.Player.IsCastingInterruptableSpell(true))
             {
                 Evading = false;
                 EvadeToPoint = Vector2.Zero;
@@ -486,7 +544,7 @@ namespace Evade
                 return;
             }
                                      
-            if (Utility.PlayerWindingUp && !Orbwalker.IsAutoAttacking)
+            if (ObjectManager.Player.IsWindingUp && !Orbwalking.IsAutoAttack(ObjectManager.Player.LastCastedSpellName()))
             {
                 Evading = false;
                 return;
@@ -513,14 +571,13 @@ namespace Evade
                 return;
             }
 
-            /*
             //Shield allies.
-            foreach (var ally in ObjectManager.Get<AIHeroClient>())
+            foreach (var ally in ObjectManager.Get<Obj_AI_Hero>())
             {
-                if (ally.IsValidTarget(1000))
+                if (ally.IsValidTarget(1000, false))
                 {
-                    var shieldAlly = Config.shielding["shield" + ally.ChampionName].Cast<CheckBox>(); //I think xD
-                    if (shieldAlly != null && shieldAlly.CurrentValue)
+                    var shieldAlly = Config.Menu.Item("shield" + ally.ChampionName);
+                    if (shieldAlly != null && shieldAlly.GetValue<bool>())
                     {
                         var allySafeResult = IsSafe(ally.ServerPosition.To2D());
 
@@ -530,7 +587,7 @@ namespace Evade
 
                             foreach (var skillshot in allySafeResult.SkillshotList)
                             {
-                                dangerLevel = Math.Max(dangerLevel, skillshot.GetSliderValue("DangerLevel").CurrentValue);
+                                dangerLevel = Math.Max(dangerLevel, skillshot.GetValue<Slider>("DangerLevel").Value);
                             }
 
                             foreach (var evadeSpell in EvadeSpellDatabase.Spells)
@@ -548,9 +605,9 @@ namespace Evade
                     }
                 }
             }
-            */
+
             //Spell Shielded
-            if (ObjectManager.Player.MagicShield > 0)
+            if (ObjectManager.Player.IsSpellShielded())
             {
                 PathFollower.Stop();
                 return;
@@ -616,7 +673,7 @@ namespace Evade
                 if (!safeResult.IsSafe)
                 {
                     //Search for an evade point:
-                    Core.DelayAction(() => TryToEvade(safeResult.SkillshotList, EvadeToPoint.IsValid() ? EvadeToPoint : Game.CursorPos.To2D()), (46));
+                    TryToEvade(safeResult.SkillshotList, EvadeToPoint.IsValid() ? EvadeToPoint : Game.CursorPos.To2D());
                 }
                     //Outside the danger polygon.
                 else
@@ -642,7 +699,7 @@ namespace Evade
 
                 if (Evading)
                 {
-                    var blockLevel = Config.misc["BlockSpells"].Cast<Slider>().CurrentValue;
+                    var blockLevel = Config.Menu.Item("BlockSpells").GetValue<StringList>().SelectedIndex;
 
                     if (blockLevel == 0)
                     {
@@ -654,7 +711,7 @@ namespace Evade
                     {
                         if (skillshot.Evade() && skillshot.IsDanger(PlayerPosition))
                         {
-                            isDangerous = skillshot.GetCheckBoxValue("IsDangerous").CurrentValue;
+                            isDangerous = skillshot.GetValue<bool>("IsDangerous");
                             if (isDangerous)
                             {
                                 break;
@@ -676,7 +733,7 @@ namespace Evade
         /// Used to block the movement to avoid entering in dangerous areas.
         /// </summary>
         /// 
-        private static void ObjAiHeroOnOnIssueOrder(Obj_AI_Base sender, PlayerIssueOrderEventArgs args)
+        private static void ObjAiHeroOnOnIssueOrder(Obj_AI_Base sender, GameObjectIssueOrderEventArgs args)
         {
             if (!sender.IsMe)
             {
@@ -690,7 +747,7 @@ namespace Evade
             }
 
             //Evading disabled
-            if (!Config.Menu["Enabled"].Cast<KeyBind>().CurrentValue)
+            if (!Config.Menu.Item("Enabled").GetValue<KeyBind>().Active)
             {
                 return;
             }
@@ -701,12 +758,12 @@ namespace Evade
             }
 
             //Spell Shielded
-            if (ObjectManager.Player.MagicShield > 0)
+            if (ObjectManager.Player.IsSpellShielded())
             {
                 return;
             }
 
-            if (PlayerChampionName == "Olaf" && Config.misc["DisableEvadeForOlafR"].Cast<CheckBox>().CurrentValue && ObjectManager.Player.HasBuff("OlafRagnarok"))
+            if (PlayerChampionName == "Olaf" && Config.Menu.Item("DisableEvadeForOlafR").GetValue<bool>() && ObjectManager.Player.HasBuff("OlafRagnarok"))
             {
                 return;
             }
@@ -788,7 +845,7 @@ namespace Evade
             if (!safePath.IsSafe && args.Order == GameObjectOrder.AttackUnit)
             {
                 var target = args.Target;
-                if (target != null && target.IsValid && target.IsVisible)
+                if (target != null && target.IsValid<Obj_AI_Base>() && target.IsVisible)
                 {
                     //Out of attack range.
                     if (PlayerPosition.Distance(((Obj_AI_Base)target).ServerPosition) >
@@ -805,7 +862,7 @@ namespace Evade
             }
         }
 
-        private static void UnitOnOnDash(Obj_AI_Base sender, Dash.DashEventArgs args)
+        private static void UnitOnOnDash(Obj_AI_Base sender, Dash.DashItem args)
         {
             if (sender.IsMe)
             {
@@ -921,7 +978,7 @@ namespace Evade
 
             foreach (var skillshot in HitBy)
             {
-                dangerLevel = Math.Max(dangerLevel, skillshot.GetSliderValue("DangerLevel").CurrentValue);
+                dangerLevel = Math.Max(dangerLevel, skillshot.GetValue<Slider>("DangerLevel").Value);
             }
 
             foreach (var evadeSpell in EvadeSpellDatabase.Spells)
@@ -1024,7 +1081,7 @@ namespace Evade
 
                                 if (evadeSpell.IsTargetted &&
                                     evadeSpell.ValidTargets.Contains(SpellValidTargets.AllyWards) &&
-                                    Config.evadeSpells["WardJump" + evadeSpell.Name].Cast<CheckBox>().CurrentValue)
+                                    Config.Menu.Item("WardJump" + evadeSpell.Name).GetValue<bool>())
                                 {
                                     var wardSlot = Items.GetWardSlot();
                                     if (wardSlot != null)
@@ -1123,8 +1180,13 @@ namespace Evade
                                         {
                                             ObjectManager.Player.SendMovePacket(EvadePoint);
                                             var theSpell = evadeSpell;
-                                            Core.DelayAction(() => ObjectManager.Player.Spellbook.CastSpell(
-                                                theSpell.Slot, EvadePoint.To3D()), Game.Ping/2 + 100);
+                                            Utility.DelayAction.Add(
+                                                Game.Ping / 2 + 100,
+                                                delegate
+                                                {
+                                                    ObjectManager.Player.Spellbook.CastSpell(
+                                                        theSpell.Slot, EvadePoint.To3D());
+                                                });
                                         }
                                         else
                                         {
@@ -1185,7 +1247,7 @@ namespace Evade
 
                                 if (evadeSpell.IsTargetted &&
                                     evadeSpell.ValidTargets.Contains(SpellValidTargets.AllyWards) &&
-                                    Config.evadeSpells["WardJump" + evadeSpell.Name].Cast<CheckBox>().CurrentValue)
+                                    Config.Menu.Item("WardJump" + evadeSpell.Name).GetValue<bool>())
                                 {
                                     var wardSlot = Items.GetWardSlot();
                                     if (wardSlot != null)
@@ -1328,11 +1390,11 @@ namespace Evade
                     }
 
                     //Zhonyas
-                    if (evadeSpell.Name == "Zhonyas" && (Item.CanUseItem("ZhonyasHourglass")))
+                    if (evadeSpell.Name == "Zhonyas" && (Items.CanUseItem("ZhonyasHourglass")))
                     {
                         if (IsAboutToHit(ObjectManager.Player, 100))
                         {
-                            Item.UseItem("ZhonyasHourglass");
+                            Items.UseItem("ZhonyasHourglass");
                         }
 
                         //Let the user move freely inside the skillshot.
@@ -1362,30 +1424,30 @@ namespace Evade
 
         private static void Drawing_OnDraw(EventArgs args)
         {
-            if (!Config.drawings["EnableDrawings"].Cast<CheckBox>().CurrentValue)
+            if (!Config.Menu.Item("EnableDrawings").GetValue<bool>())
             {
                 return;
             }
 
-            if (Config.drawings["ShowEvadeStatus"].Cast<CheckBox>().CurrentValue)
+            if (Config.Menu.Item("ShowEvadeStatus").GetValue<bool>())
             {
                 var heropos = Drawing.WorldToScreen(ObjectManager.Player.Position);
-                if (Config.Menu["Enabled"].Cast<KeyBind>().CurrentValue)
+                if (Config.Menu.Item("Enabled").GetValue<KeyBind>().Active)
                 {
                     Drawing.DrawText(heropos.X, heropos.Y, Color.Red, "Evade: ON");
                 }
             }
 
-            var Border = Config.drawings["Border"].Cast<Slider>().CurrentValue;
-            var missileColor = Config.MissileColor;
+            var Border = Config.Menu.Item("Border").GetValue<Slider>().Value;
+            var missileColor = Config.Menu.Item("MissileColor").GetValue<Color>();
             
             //Draw the polygon for each skillshot.
             foreach (var skillshot in DetectedSkillshots)
             {
                 skillshot.Draw(
-                    (skillshot.Evade() && Config.Menu["Enabled"].Cast<KeyBind>().CurrentValue)
-                        ? Config.EnabledColor
-                        : Config.DisabledColor, missileColor, Border);
+                    (skillshot.Evade() && Config.Menu.Item("Enabled").GetValue<KeyBind>().Active)
+                        ? Config.Menu.Item("EnabledColor").GetValue<Color>()
+                        : Config.Menu.Item("DisabledColor").GetValue<Color>(), missileColor, Border);
             }
 
             if (Config.TestOnAllies)
