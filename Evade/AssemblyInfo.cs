@@ -1,4 +1,4 @@
-﻿// Copyright 2014 - 2014 Esk0r
+// Copyright 2014 - 2014 Esk0r
 // AssemblyInfo.cs is part of Evade.
 // 
 // Evade is free software: you can redistribute it and/or modify
@@ -55,5 +55,5 @@ using System.Runtime.InteropServices;
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
 
-[assembly: AssemblyVersion("5.16.0.1")]
-[assembly: AssemblyFileVersion("5.16.0.1")]
+[assembly: AssemblyVersion("6.9.0.1")]
+[assembly: AssemblyFileVersion("6.9.0.1")]
