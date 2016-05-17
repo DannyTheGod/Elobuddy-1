@@ -123,7 +123,7 @@ namespace Evade
                 spell = new MoveBuffData(
                     "Katarina W", SpellSlot.W, 100, 3,
                     () =>
-                        ObjectManager.Get<AIHeroClient>().Any(h => h.IsValidTarget(375))
+                        ObjectManager.Get<Obj_AI_Hero>().Any(h => h.IsValidTarget(375))
                             ? ObjectManager.Player.MoveSpeed *
                               (1 + 0.10f + 0.05f * ObjectManager.Player.Spellbook.GetSpell(SpellSlot.W).Level)
                             : 0);
@@ -323,7 +323,7 @@ namespace Evade
 
             if (ObjectManager.Player.ChampionName == "Caitlyn")
             {
-                spell = new DashData("Caitlyn E", SpellSlot.E, 490, true, 250, 1000, 3);
+                spell = new DashData("Caitlyn E", SpellSlot.E, 390, true, 250, 1000, 3);
                 spell.Invert = true;
                 Spells.Add(spell);
             }
@@ -334,7 +334,7 @@ namespace Evade
 
             if (ObjectManager.Player.ChampionName == "Corki")
             {
-                spell = new DashData("Corki W", SpellSlot.W, 790, false, 250, 1044, 3);
+                spell = new DashData("Corki W", SpellSlot.W, 600, false, 250, 1044, 3);
                 Spells.Add(spell);
             }
 
@@ -525,17 +525,6 @@ namespace Evade
             }
 
             #endregion
-            
-            #region Yasuo
-
-            if (ObjectManager.Player.ChampionName == "Yasuo")
-            {
-                spell = new DashData("Yasuo E", SpellSlot.E, 475, true, 50, 2000, 2); //550 cast range?
-                spell.ValidTargets = new[] { SpellValidTargets.EnemyChampions, SpellValidTargets.EnemyMinions };
-                Spells.Add(spell);
-            }
-
-            #endregion
 
             #endregion
 
@@ -649,10 +638,9 @@ namespace Evade
             #endregion
 
             //Flash
-            if (ObjectManager.Player.GetSpellSlotFromName("summonerflash") != SpellSlot.Unknown)
+            if (ObjectManager.Player.GetSpellSlot("SummonerFlash") != SpellSlot.Unknown)
             {
-                spell = new BlinkData("Flash", ObjectManager.Player.GetSpellSlotFromName("summonerflash"), 400, 100, 5,
-                    true);
+                spell = new BlinkData("Flash", ObjectManager.Player.GetSpellSlot("SummonerFlash"), 400, 100, 5, true);
                 Spells.Add(spell);
             }
 
@@ -662,8 +650,8 @@ namespace Evade
 
             #region Champion Shields
 
-            #region Akali
-
+            #region Tahm
+            // add tahm eating here
             #endregion
 
             #region Annie
